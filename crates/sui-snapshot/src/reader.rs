@@ -30,6 +30,8 @@ use sui_storage::object_store::ObjectStoreConfig;
 use sui_types::base_types::{ObjectDigest, ObjectID, ObjectRef, SequenceNumber};
 use tokio::sync::Mutex;
 
+const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 10;
+
 pub type DigestByBucketAndPartition = BTreeMap<u32, BTreeMap<u32, [u8; 32]>>;
 pub struct StateSnapshotReaderV1 {
     epoch: u64,
@@ -48,8 +50,10 @@ impl StateSnapshotReaderV1 {
         remote_store_config: &ObjectStoreConfig,
         local_store_config: &ObjectStoreConfig,
         indirect_objects_threshold: usize,
-        download_concurrency: NonZeroUsize,
+        download_concurrency: Option<NonZeroUsize>,
     ) -> Result<Self> {
+        let download_concurrency = download_concurrency
+            .unwrap_or_else(|| NonZeroUsize::new(DEFAULT_DOWNLOAD_CONCURRENCY).unwrap());
         let epoch_dir = format!("epoch_{}", epoch);
         let remote_object_store = remote_store_config.make()?;
 

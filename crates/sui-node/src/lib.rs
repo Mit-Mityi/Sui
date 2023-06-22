@@ -21,6 +21,7 @@ use futures::TryFutureExt;
 use mysten_common::sync::async_once_cell::AsyncOnceCell;
 use prometheus::Registry;
 use reqwest::Client;
+use sui_config::node::SnapshotRestoreConfig;
 use sui_core::authority::CHAIN_IDENTIFIER;
 use sui_core::consensus_adapter::LazyNarwhalClient;
 use sui_json_rpc::api::JsonRpcMetrics;
@@ -268,6 +269,17 @@ impl SuiNode {
             &config.db_path().join("store"),
             Some(perpetual_options.options),
         ));
+
+        if perpetual_tables
+            .database_is_empty()
+            .expect("Database read should not fail at init.")
+        {
+            if let Some(snapshot_restore_config) = config.snapshot_restore_config {
+                self.restore_from_snapshot(snapshot_restore_config, perpetual_tables.clone())
+                    .await?;
+            }
+        }
+
         let is_genesis = perpetual_tables
             .database_is_empty()
             .expect("Database read should not fail at init.");
@@ -586,6 +598,37 @@ impl SuiNode {
             .set(node)
             .expect("Failed to set Arc<Node> in node_once_cell");
         Ok(())
+    }
+
+    pub fn restore_from_snapshot(
+        &self,
+        snapshot_restore_config: SnapshotRestoreConfig,
+        perpetual_tables: Arc<AuthorityPerpetualTables>,
+        local_object_store_path: PathBuf,
+    ) {
+        /// TODO(william)
+        // 1. In parallel
+        //   a. Verification branch -- in parallel
+        //      i.
+        //          * Download all snapshot object refs
+        //          * Compute root state hash of snaphot from obj refs
+        //      ii.
+        //          * Sync all checkpoint summaries up to the last checkpoint of the epoch
+        //          * Get root state hash of last checkpoint
+        //    b. Join on the above two tasks, then verify that the root state hash of the snapshot matches the checkpoint.
+        //       If not, cancel snapshot download task (early terminate)
+        // 2. Download all snapshot objects
+        let mut snapshot_reader = StateSnapshotReaderV1::new(
+            snapshot_restore_config.epoch,
+            &snapshot_restore_config.object_store_config,
+            ObjectStoreConfig {
+                directory: Some(local_object_store_path),
+                ..Default::default()
+            },
+            usize::MAX,
+            snapshot_restore_config.download_concurrency,
+        )
+        .await?;
     }
 
     pub fn subscribe_to_epoch_change(&self) -> broadcast::Receiver<SuiSystemState> {
